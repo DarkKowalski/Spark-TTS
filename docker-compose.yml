@@ -1,0 +1,12 @@
+services:
+  openvino:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    runtime: nvidia
+    ipc: host
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/app
+    entrypoint: /bin/bash

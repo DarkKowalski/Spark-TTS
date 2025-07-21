@@ -73,7 +73,7 @@ class Encoder(nn.Module):
 
         self.project = nn.Linear(vocos_dim, out_channels)
 
-    def forward(self, x: torch.Tensor, *args):
+    def forward(self, x: torch.Tensor):
         """
         Args:
             x (torch.Tensor): (batch_size, input_channels, length)
