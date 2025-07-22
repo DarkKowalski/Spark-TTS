@@ -4,7 +4,7 @@ import shutil
 
 from transformers import AutoTokenizer
 from optimum.intel.openvino import OVModelForCausalLM
-
+from openvino_tokenizers import convert_tokenizer
 from pathlib import Path
 
 from sparktts.models.bicodec import BiCodec
@@ -20,10 +20,12 @@ SAMPLE_RATE = 16000  # Hz
 
 def export(pretrained: Path, to_dir: Path):
     # LLM
-    tokenizer = AutoTokenizer.from_pretrained(pretrained / "LLM")
+    hf_tokenizer = AutoTokenizer.from_pretrained(pretrained / "LLM")
     llm = OVModelForCausalLM.from_pretrained(pretrained / "LLM", export=True)
-    tokenizer.save_pretrained(to_dir / "LLM")
+    ov_llm_tokenizer, ov_llm_detokenizer = convert_tokenizer(hf_tokenizer, with_detokenizer=True)
     llm.save_pretrained(to_dir / "LLM")
+    ov.save_model(ov_llm_tokenizer, to_dir / "LLM/openvino_tokenizer.xml")
+    ov.save_model(ov_llm_detokenizer, to_dir / "LLM/openvino_detokenizer.xml")
 
     audio_tokenizer_config = load_config(pretrained / "BiCodec" / "config.yaml")["audio_tokenizer"]
 
