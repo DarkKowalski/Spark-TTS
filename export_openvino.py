@@ -3,7 +3,7 @@ import torch
 import shutil
 
 from transformers import AutoTokenizer
-from optimum.intel.openvino import OVModelForCausalLM
+from optimum.intel.openvino import OVModelForCausalLM, OVWeightQuantizationConfig
 from openvino_tokenizers import convert_tokenizer
 from pathlib import Path
 
@@ -21,7 +21,8 @@ SAMPLE_RATE = 16000  # Hz
 def export(pretrained: Path, to_dir: Path):
     # LLM
     hf_tokenizer = AutoTokenizer.from_pretrained(pretrained / "LLM")
-    llm = OVModelForCausalLM.from_pretrained(pretrained / "LLM", export=True)
+    llm = OVModelForCausalLM.from_pretrained(pretrained / "LLM", export=True, quantization_config=OVWeightQuantizationConfig(bits=8))
+    # llm = OVModelForCausalLM.from_pretrained(pretrained / "LLM", export=True)
     ov_llm_tokenizer, ov_llm_detokenizer = convert_tokenizer(hf_tokenizer, with_detokenizer=True)
     llm.save_pretrained(to_dir / "LLM")
     ov.save_model(ov_llm_tokenizer, to_dir / "LLM/openvino_tokenizer.xml")
