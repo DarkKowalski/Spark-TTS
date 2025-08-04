@@ -1,6 +1,7 @@
 import openvino as ov
 import torch
 import shutil
+import coremltools as ct
 
 from transformers import AutoTokenizer
 from openvino_tokenizers import convert_tokenizer
@@ -18,24 +19,22 @@ AUDIO_DETOKENIZER_DURATION = 1  # seconds
 SAMPLE_RATE = 16000  # Hz
 
 def export(pretrained: Path, to_dir: Path):
-    # LLM
-    hf_tokenizer = AutoTokenizer.from_pretrained(pretrained / "LLM")
-    ov_llm_tokenizer, ov_llm_detokenizer = convert_tokenizer(hf_tokenizer, with_detokenizer=True)
-    ov.save_model(ov_llm_tokenizer, to_dir / "LLM/openvino_tokenizer.xml")
-    ov.save_model(ov_llm_detokenizer, to_dir / "LLM/openvino_detokenizer.xml")
-
     audio_tokenizer_config = load_config(pretrained / "BiCodec" / "config.yaml")["audio_tokenizer"]
 
     # MelSpectrogram
     mel_spectrogram = MelSpectrogram(audio_tokenizer_config["mel_params"])
+    mel_spectrogram.eval()
 
     # Wav2Vec2
     wav2vec = Wav2Vec2Wrapper(pretrained / "wav2vec2-large-xlsr-53")
+    wav2vec.eval()
 
     # BiCodec
     bicodec = BiCodec.load_from_checkpoint(pretrained / "BiCodec")
     bicodec_tokenizer = BiCodecTokenizer(bicodec)
     bicodec_detokenizer = BiCodecDetokenizer(bicodec)
+    bicodec_tokenizer.eval()
+    bicodec_detokenizer.eval()
 
     # Audio Tokenizer
     example_audio = torch.randn(SAMPLE_RATE * AUDIO_TOKENIZER_DURATION, dtype=torch.float32)  # [96000]
@@ -44,30 +43,48 @@ def export(pretrained: Path, to_dir: Path):
     feat_input = example_audio.unsqueeze(0)             # [1, 96000]
     mel = mel_spectrogram(mel_input)                    # [1, 128, 302]
     feat = wav2vec(feat_input)                          # [1, 299, 1024]
-    # Convert models to OpenVINO format
-    ov_mel_spectrogram = ov.convert_model(mel_spectrogram, example_input=mel_input)
-    ov_wav2vec = ov.convert_model(wav2vec, example_input=feat_input)
-    ov_bicodec_tokenizer = ov.convert_model(bicodec_tokenizer, example_input=(feat, mel))
-    # Save OpenVINO models
-    ov.save_model(ov_mel_spectrogram, to_dir / "AudioTokenizer/mel_spectrogram.xml")
-    ov.save_model(ov_wav2vec, to_dir / "AudioTokenizer/wav2vec.xml")
-    ov.save_model(ov_bicodec_tokenizer, to_dir / "AudioTokenizer/bicodec_tokenizer.xml")
 
+    # Convert models to Core ML format
+    traced_mel_spectrogram = torch.jit.trace(mel_spectrogram, (mel_input,))
+    traced_wav2vec = torch.jit.trace(wav2vec, (feat_input,))
+    traced_bicodec_tokenizer = torch.jit.trace(bicodec_tokenizer, (feat, mel))
 
-    # # Audio Detokenizer
+    coreml_mel_spectrogram = ct.convert(
+        traced_mel_spectrogram,
+        inputs=[ct.TensorType(shape=mel_input.shape)],
+    )
+    coreml_wav2vec = ct.convert(
+        traced_wav2vec,
+        inputs=[ct.TensorType(shape=feat_input.shape)],
+    )
+    coreml_bicodec_tokenizer = ct.convert(
+        traced_bicodec_tokenizer,
+        inputs=[ct.TensorType(shape=feat.shape), ct.TensorType(shape=mel.shape)],
+    )
+
+    # Save Core ML models
+    coreml_mel_spectrogram.save(to_dir / "AudioTokenizer/mel_spectrogram.mlpackage")
+    coreml_wav2vec.save(to_dir / "AudioTokenizer/wav2vec.mlpackage")
+    coreml_bicodec_tokenizer.save(to_dir / "AudioTokenizer/bicodec_tokenizer.mlpackage")
+
+    # Audio Detokenizer
     # [1, 50], torch.int64
     example_semantic_tokens = torch.randint(0, 1000, (1, 50), dtype=torch.int64)  # Example semantic tokens
     # [1, 1, 32], torch.int32
     example_global_tokens = torch.randint(0, 1000, (1, 1, 32), dtype=torch.int32)  # Example global tokens
-    ov_bicodec_detokenizer = ov.convert_model(
-        bicodec_detokenizer,
-        example_input=(example_semantic_tokens, example_global_tokens)
+
+    traced_bicodec_detokenizer = torch.jit.trace(bicodec_detokenizer, (example_semantic_tokens, example_global_tokens))
+    coreml_bicodec_detokenizer = ct.convert(
+        traced_bicodec_detokenizer,
+        inputs=[ct.TensorType(shape=example_semantic_tokens.shape), ct.TensorType(shape=example_global_tokens.shape)],
     )
-    ov.save_model(ov_bicodec_detokenizer, to_dir / "AudioDetokenizer/bicodec_detokenizer.xml")
+
+    coreml_bicodec_detokenizer.save(to_dir / "AudioDetokenizer/bicodec_detokenizer.mlpackage")
+
 
 def main():
     pretrained = Path("pretrained_models/Spark-TTS-0.5B")
-    to_dir = Path("openvino_models/Spark-TTS-0.5B")
+    to_dir = Path("coreml_models/Spark-TTS-0.5B")
 
     # remove to_dir if it exists
     if to_dir.exists():

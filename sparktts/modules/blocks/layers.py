@@ -30,7 +30,8 @@ def WNConvTranspose1d(*args, **kwargs):
 
 
 # Scripting this brings model speed up 1.4x
-@torch.jit.script
+# @torch.jit.script
+# Removed, otherwise, cannot be exported to CoreML
 def snake(x, alpha):
     shape = x.shape
     x = x.reshape(shape[0], shape[1], -1)
