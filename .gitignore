@@ -177,4 +177,5 @@ cython_debug/
 /gguf
 /openvino_models
 /coreml_models
+/onnx_models
 *.wav

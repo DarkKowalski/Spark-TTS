@@ -17,3 +17,5 @@ ipykernel
 optimum-intel==1.24.0
 nncf
 coremltools
+onnx
+onnxscript

@@ -1,7 +1,5 @@
 import torch
 import shutil
-import coremltools as ct
-
 from pathlib import Path
 
 from sparktts.models.bicodec import BiCodec
@@ -41,28 +39,15 @@ def export(pretrained: Path, to_dir: Path):
     mel = mel_spectrogram(mel_input)                    # [1, 128, 302]
     feat = wav2vec(feat_input)                          # [1, 299, 1024]
 
-    # Convert models to Core ML format
-    traced_mel_spectrogram = torch.jit.trace(mel_spectrogram, (mel_input,))
-    traced_wav2vec = torch.jit.trace(wav2vec, (feat_input,))
-    traced_bicodec_tokenizer = torch.jit.trace(bicodec_tokenizer, (feat, mel))
+    # To ONNX
+    onnx_mel_spectrogram = torch.onnx.export(mel_spectrogram, (mel_input,), dynamo=True)
+    onnx_wav2vec = torch.onnx.export(wav2vec, (feat_input,), dynamo=True)
+    onnx_bicodec_tokenizer = torch.onnx.export(bicodec_tokenizer, (feat, mel), dynamo=True)
 
-    coreml_mel_spectrogram = ct.convert(
-        traced_mel_spectrogram,
-        inputs=[ct.TensorType(shape=mel_input.shape)],
-    )
-    coreml_wav2vec = ct.convert(
-        traced_wav2vec,
-        inputs=[ct.TensorType(shape=feat_input.shape)],
-    )
-    coreml_bicodec_tokenizer = ct.convert(
-        traced_bicodec_tokenizer,
-        inputs=[ct.TensorType(shape=feat.shape), ct.TensorType(shape=mel.shape)],
-    )
-
-    # Save Core ML models
-    coreml_mel_spectrogram.save(to_dir / "AudioTokenizer/mel_spectrogram.mlpackage")
-    coreml_wav2vec.save(to_dir / "AudioTokenizer/wav2vec.mlpackage")
-    coreml_bicodec_tokenizer.save(to_dir / "AudioTokenizer/bicodec_tokenizer.mlpackage")
+    # Save ONNX models
+    onnx_mel_spectrogram.save(to_dir / "AudioTokenizer/mel_spectrogram.onnx")
+    onnx_wav2vec.save(to_dir / "AudioTokenizer/wav2vec.onnx")
+    onnx_bicodec_tokenizer.save(to_dir / "AudioTokenizer/bicodec_tokenizer.onnx")
 
     # Audio Detokenizer
     # [1, 50], torch.int64
@@ -70,22 +55,24 @@ def export(pretrained: Path, to_dir: Path):
     # [1, 1, 32], torch.int32
     example_global_tokens = torch.randint(0, 1000, (1, 1, 32), dtype=torch.int32)  # Example global tokens
 
-    traced_bicodec_detokenizer = torch.jit.trace(bicodec_detokenizer, (example_semantic_tokens, example_global_tokens))
-    coreml_bicodec_detokenizer = ct.convert(
-        traced_bicodec_detokenizer,
-        inputs=[ct.TensorType(shape=example_semantic_tokens.shape), ct.TensorType(shape=example_global_tokens.shape)],
+    onnx_bicodec_detokenizer = torch.onnx.export(
+        bicodec_detokenizer,
+        (example_semantic_tokens, example_global_tokens),
+        dynamo=True
     )
-
-    coreml_bicodec_detokenizer.save(to_dir / "AudioDetokenizer/bicodec_detokenizer.mlpackage")
+    onnx_bicodec_detokenizer.save(to_dir / "AudioDetokenizer/bicodec_detokenizer.onnx")
 
 
 def main():
     pretrained = Path("pretrained_models/Spark-TTS-0.5B")
-    to_dir = Path("coreml_models/Spark-TTS-0.5B")
+    to_dir = Path("onnx_models/Spark-TTS-0.5B")
 
     # remove to_dir if it exists
     if to_dir.exists():
         shutil.rmtree(to_dir)
+    to_dir.mkdir(parents=True, exist_ok=True)
+    (to_dir / "AudioTokenizer").mkdir(parents=True, exist_ok=True)
+    (to_dir / "AudioDetokenizer").mkdir(parents=True, exist_ok=True)
 
     export(pretrained, to_dir)
 
