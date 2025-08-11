@@ -1,6 +1,7 @@
 import torch
 import shutil
 import coremltools as ct
+import numpy as np
 
 from pathlib import Path
 
@@ -48,21 +49,24 @@ def export(pretrained: Path, to_dir: Path):
 
     coreml_mel_spectrogram = ct.convert(
         traced_mel_spectrogram,
-        inputs=[ct.TensorType(shape=mel_input.shape)],
+        inputs=[ct.TensorType(shape=mel_input.shape, name="mel_input")],
+        outputs=[ct.TensorType(name="mel_output")],
     )
     coreml_wav2vec = ct.convert(
         traced_wav2vec,
-        inputs=[ct.TensorType(shape=feat_input.shape)],
+        inputs=[ct.TensorType(shape=feat_input.shape, name="feat_input")],
+        outputs=[ct.TensorType(name="feat_output")],
     )
     coreml_bicodec_tokenizer = ct.convert(
         traced_bicodec_tokenizer,
-        inputs=[ct.TensorType(shape=feat.shape), ct.TensorType(shape=mel.shape)],
+        inputs=[ct.TensorType(shape=feat.shape, name="feat"), ct.TensorType(shape=mel.shape, name="mel")],
+        outputs=[ct.TensorType(name="semantic_tokens"), ct.TensorType(name="global_tokens")],
     )
 
     # Save Core ML models
-    coreml_mel_spectrogram.save(to_dir / "AudioTokenizer/mel_spectrogram.mlpackage")
-    coreml_wav2vec.save(to_dir / "AudioTokenizer/wav2vec.mlpackage")
-    coreml_bicodec_tokenizer.save(to_dir / "AudioTokenizer/bicodec_tokenizer.mlpackage")
+    coreml_mel_spectrogram.save(to_dir / "AudioTokenizer/MelSpectrogram.mlpackage")
+    coreml_wav2vec.save(to_dir / "AudioTokenizer/Wav2Vec.mlpackage")
+    coreml_bicodec_tokenizer.save(to_dir / "AudioTokenizer/BiCodecTokenizer.mlpackage")
 
     # Audio Detokenizer
     # [1, 50], torch.int64
@@ -73,10 +77,14 @@ def export(pretrained: Path, to_dir: Path):
     traced_bicodec_detokenizer = torch.jit.trace(bicodec_detokenizer, (example_semantic_tokens, example_global_tokens))
     coreml_bicodec_detokenizer = ct.convert(
         traced_bicodec_detokenizer,
-        inputs=[ct.TensorType(shape=example_semantic_tokens.shape), ct.TensorType(shape=example_global_tokens.shape)],
+        inputs=[
+            ct.TensorType(shape=example_semantic_tokens.shape, name="semantic_tokens"),
+            ct.TensorType(shape=example_global_tokens.shape, name="global_tokens")
+        ],
+        outputs=[ct.TensorType(name="wav_recon")],
     )
 
-    coreml_bicodec_detokenizer.save(to_dir / "AudioDetokenizer/bicodec_detokenizer.mlpackage")
+    coreml_bicodec_detokenizer.save(to_dir / "AudioDetokenizer/BiCodecDetokenizer.mlpackage")
 
 
 def main():

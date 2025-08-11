@@ -12,6 +12,7 @@ from openvino_export.wav2vec2 import Wav2Vec2Wrapper
 AUDIO_TOKENIZER_DURATION = 6  # seconds
 AUDIO_DETOKENIZER_DURATION = 1  # seconds
 SAMPLE_RATE = 16000  # Hz
+OPSET_VERSION = 14  # ONNX opset version
 
 def export(pretrained: Path, to_dir: Path):
     audio_tokenizer_config = load_config(pretrained / "BiCodec" / "config.yaml")["audio_tokenizer"]
@@ -40,14 +41,41 @@ def export(pretrained: Path, to_dir: Path):
     feat = wav2vec(feat_input)                          # [1, 299, 1024]
 
     # To ONNX
-    onnx_mel_spectrogram = torch.onnx.export(mel_spectrogram, (mel_input,), dynamo=True)
-    onnx_wav2vec = torch.onnx.export(wav2vec, (feat_input,), dynamo=True)
-    onnx_bicodec_tokenizer = torch.onnx.export(bicodec_tokenizer, (feat, mel), dynamo=True)
+    torch.onnx.export(
+        mel_spectrogram, 
+        (mel_input,),
+        to_dir / "AudioTokenizer/mel_spectrogram.onnx",
+        input_names=['mel_input'], 
+        output_names=['mel_output'],
+        do_constant_folding=True,
+        opset_version=OPSET_VERSION
+    )
+    
+
+    torch.onnx.export(
+        wav2vec, 
+        (feat_input,), 
+        to_dir / "AudioTokenizer/wav2vec.onnx",
+        input_names=['feat_input'], 
+        output_names=['feat_output'],
+        do_constant_folding=True,
+        opset_version=OPSET_VERSION
+    )
+
+    torch.onnx.export(
+        bicodec_tokenizer, 
+        (feat, mel), 
+        to_dir / "AudioTokenizer/bicodec_tokenizer.onnx",
+        input_names=['feat', 'mel'], 
+        output_names=['semantic_tokens', 'global_tokens'],
+        do_constant_folding=True,
+        opset_version=OPSET_VERSION
+    )
 
     # Save ONNX models
-    onnx_mel_spectrogram.save(to_dir / "AudioTokenizer/mel_spectrogram.onnx")
-    onnx_wav2vec.save(to_dir / "AudioTokenizer/wav2vec.onnx")
-    onnx_bicodec_tokenizer.save(to_dir / "AudioTokenizer/bicodec_tokenizer.onnx")
+    # onnx_mel_spectrogram.save(to_dir / "AudioTokenizer/mel_spectrogram.onnx")
+    # onnx_wav2vec.save(to_dir / "AudioTokenizer/wav2vec.onnx")
+    # onnx_bicodec_tokenizer.save(to_dir / "AudioTokenizer/bicodec_tokenizer.onnx")
 
     # Audio Detokenizer
     # [1, 50], torch.int64
@@ -55,12 +83,16 @@ def export(pretrained: Path, to_dir: Path):
     # [1, 1, 32], torch.int32
     example_global_tokens = torch.randint(0, 1000, (1, 1, 32), dtype=torch.int32)  # Example global tokens
 
-    onnx_bicodec_detokenizer = torch.onnx.export(
+    torch.onnx.export(
         bicodec_detokenizer,
         (example_semantic_tokens, example_global_tokens),
-        dynamo=True
+        to_dir / "AudioDetokenizer/bicodec_detokenizer.onnx",
+        input_names=['semantic_tokens', 'global_tokens'],
+        output_names=['wav_recon'],
+        do_constant_folding=True,
+        opset_version=OPSET_VERSION
     )
-    onnx_bicodec_detokenizer.save(to_dir / "AudioDetokenizer/bicodec_detokenizer.onnx")
+    # onnx_bicodec_detokenizer.save(to_dir / "AudioDetokenizer/bicodec_detokenizer.onnx")
 
 
 def main():
